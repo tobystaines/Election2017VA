@@ -1,0 +1,567 @@
+---
+title: "UK General Election 2017"
+author: "Toby Staines"
+date: "13 December 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Prepare R Environment
+
+Load the required libraries
+
+```{r, echo=False}
+# For spatial data handling
+library(rgdal)
+library(spdep)
+library(rgeos)
+# For charting
+library(tmap)
+library(cartogram)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+# For data loding and munging
+library(readr)
+library(dplyr)
+library(tidyr)
+library(car)
+# For spatial stats
+library(GWmodel)
+library(spdep)
+# For cluster analysis
+library(cluster)
+# For political mapping
+library(leaflet)
+library(sf)
+library(htmlwidgets)
+library(parlitools)
+```
+
+Load the raw data. 2015 results and have swing have already been incorporated in Excel.
+
+```{r, echo=FALSE}
+
+election17 <- read_csv('HoC-GE2017-constituency-results.csv')
+census_data_ts <- read_csv('2011_census_oa_working.csv')
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r, echo=TRUE, eval=FALSE}
+
+# Group census data to constituency level and create combined variables  
+census_data_ts <- census_data_ts %>%
+  group_by(PCON16CD)%>%
+  summarise(
+    total_pop = sum(Total_Population),
+    younger_adults = sum(Age_20_to_24, Age_25_to_29, Age_30_to_44) / sum(Total_Population),
+    young_adults = sum(Age_20_to_24) / sum(Total_Population),
+    white = sum(White_British_and_Irish) / sum(Total_Population),
+    christian = sum(Christian) / sum(Total_Population),
+    english_speaking = sum(Main_language_is_English_or_Main_language_not_English__Can_speak_English_very_well)
+    / sum(Total_Population),
+    single_ethnicity_household = sum(All_household_members_have_the_same_ethnic_group) 
+    / sum(Total_Households),
+    own_home = sum(Owned_and_Shared_Ownership) / sum(Total_Households),
+    social_housing = sum(Social_rented) / sum(Total_Households),
+    not_good_health = sum(Fair_health, Bad_health, Very_bad_health) / sum(Total_Population),
+    degree_educated = sum(Highest_level_of_qualification_Level_4_qualifications_and_above) / 
+      sum(Highest_level_of_qualification_Level_4_qualifications_and_above,
+          Highest_level_of_qualification_Level_3_qualifications,
+          Highest_level_of_qualification_Level_1_Level_2_or_Apprenticeship,
+          No_qualifications),
+    no_car = sum(No_cars_or_vans_in_household) / sum(Total_Households),
+    private_transport_to_work = sum(Private_Transport) / sum(Total_Employment_16_to_74),
+    professionals = sum(Managers_directors_and_senior_officials, Professional_occupations) /
+      sum(Total_Employment_16_to_74)
+  )
+
+# Add election result data
+census_data_ts <- merge(census_data_ts, election17[, c("ons_id", "conLabSwing", "labPct15", "conPct15")], by.x="PCON16CD", by.y="ons_id")
+
+# Create hexegon map data frame of UK constituencies
+west_hex_map <- parlitools::west_hex_map #Base map
+west_hex_map$region_name <- gsub(" Euro Region","",west_hex_map$region_name)
+west_hex_map$region_name <- gsub("North East","NE, Yorkshire and Humber",west_hex_map$region_name)
+west_hex_map$region_name <- gsub("Yorkshire and the Humber","NE, Yorkshire and Humber",west_hex_map$region_name)
+ 
+swing_map <- inner_join(west_hex_map, census_data_ts, by=c("gss_code" = "PCON16CD"))
+census_data_ts <- inner_join(census_data_ts, swing_map[,c("gss_code","region_name")], by=c("PCON16CD"="gss_code"))
+# Remove redundant source data
+rm(election17)
+
+```
+
+```{r, echo=TRUE, eval=FALSE}
+# Plot map of swing from Conservative to Labour at 2017 election
+pal1 = colorNumeric("RdBu", swing_map$conLabSwing, reverse=TRUE, na.color="white")
+
+label_no1 <- paste0(
+  "<strong>", swing_map$constituency_name, "</strong>", "</br>",
+  "Swing: ", swing_map$conLabSwing
+) %>% lapply(htmltools::HTML)
+
+leaflet(options=leafletOptions(
+  dragging = FALSE, zoomControl = FALSE, tap = FALSE,
+  attributionControl = FALSE),
+  swing_map) %>%
+  addPolygons(
+    color = "grey",
+    weight=0.75,
+    opacity = 0.5,
+    fillOpacity = 1,
+    fillColor = ~pal1(conLabSwing),
+    label = label_no1) %>%
+  addLegend("topright", pal = pal1, values = ~conLabSwing,
+    title = "2017 Swing to Labour",
+    opacity = 1)  %>% 
+  htmlwidgets::onRender(
+    "function(x, y) {
+        var myMap = this;
+        myMap._container.style['background'] = '#fff';
+    }")%>% 
+  mapOptions(zoomToLimits = "first")
+
+#Plot Labout share of vote at 2015 election
+pal2 = colorNumeric("Reds", swing_map$labPct15, na.color="white")
+
+label_no2 <- paste0(
+  "<strong>", swing_map$constituency_name, "</strong>", "</br>",
+  "2015 Labour vote: ", swing_map$labPct15
+) %>% lapply(htmltools::HTML)
+
+leaflet(options=leafletOptions(
+  dragging = FALSE, zoomControl = FALSE, tap = FALSE,
+  attributionControl = FALSE),
+  swing_map) %>%
+  addPolygons(
+    color = "grey",
+    weight=0.75,
+    opacity = 0.5,
+    fillOpacity = 1,
+    fillColor = ~pal2(labPct15),
+    label = label_no2) %>%
+  addLegend("topright", pal = pal2, values = ~labPct15,
+    title = "2015 Labour Vote",
+    opacity = 1)  %>% 
+  htmlwidgets::onRender(
+    "function(x, y) {
+        var myMap = this;
+        myMap._container.style['background'] = '#fff';
+    }")%>% 
+  mapOptions(zoomToLimits = "first")
+
+```
+
+
+```{r, echo=TRUE, eval=FALSE}
+swing_map %>%
+
+  gather(c(young_adults, younger_adults, degree_educated, professionals, white, christian, english_speaking,  single_ethnicity_household, social_housing, no_car, not_good_health), key = "expl_var", value="const_prop") %>%
+
+  ggplot(aes(x=const_prop, y=conLabSwing))+
+  labs(x="Proportion of Constituency",y="Swing - Conservative to Labour") +
+  geom_point(aes(colour=region_name),pch=19) +
+  stat_smooth(method=lm, se=FALSE, size=1, colour="black")+
+  scale_color_brewer(palette="Paired")+
+  facet_wrap(~expl_var, scales="free")+
+  theme_bw()+
+  ggtitle("Demographic Variables vs 2017 Swing")
+```
+
+```{r, echo=TRUE, eval=FALSE}
+swing_map %>%
+
+  gather(c(young_adults, younger_adults, degree_educated, professionals, white, christian, english_speaking,  single_ethnicity_household, social_housing, no_car, not_good_health), key = "expl_var", value="const_prop") %>%
+
+  ggplot(aes(x=const_prop, y=labPct15))+ 
+  labs(x="Proportion of Constituency",y="2015 Labour Vote Share") +
+  geom_point(aes(colour=region_name),pch=19) +
+  stat_smooth(method=lm, se=FALSE, size=1, colour="black")+
+  scale_color_brewer(palette="Paired")+
+  facet_wrap(~expl_var, scales="free")+
+  theme_bw()+
+  ggtitle("Demographic Variables vs 2015 Labour Vote Share")
+```
+
+
+```{r, echo=TRUE, eval=FALSE}
+
+region_const_count <- census_data_ts %>%
+  group_by("region_name") %>%
+  summarise()
+
+
+```
+
+Correlation between baseline and swing
+
+```{r, echo=TRUE, eval=FALSE}
+swing_map %>%
+  ggplot(aes(x=labPct15, y=conLabSwing))+ 
+  geom_point(aes(colour=region_name),pch=19) +
+  labs(x="2017 Swing to Labour",y="2015 Labour Vote Share")+
+  stat_smooth(method=lm, se=FALSE, size=1, colour="#525252")+
+  scale_color_brewer(palette="Paired")+
+  theme_bw()+
+  ggtitle(paste("Correlation:",round(cor.test(swing_map$conLabSwing,swing_map$labPct15)$estimate,2)))
+
+```
+
+
+```{r, echo=TRUE, eval=FALSE}
+# Generate correlation coefficient matrix
+census_data_ts %>% 
+  select(conLabSwing, labPct15, young_adults, younger_adults, degree_educated, professionals, white, christian, english_speaking,  single_ethnicity_household, social_housing, no_car, not_good_health) %>%
+  ggcorr(label=TRUE,nbreaks=5,  geom = "text", hjust = 1, size = 3, palette = "RdYlGn", label_alpha=0.1, layout.exp = 2)
+
+# Look again at Scotland using a call to filter().
+census_data_ts %>% 
+  filter(region_name == "Scotland") %>%
+  select(conLabSwing, labPct15, young_adults, younger_adults, degree_educated, professionals, white, christian, english_speaking,  single_ethnicity_household, social_housing, no_car, not_good_health) %>%
+  ggcorr(label=TRUE,nbreaks=5,  geom = "text", hjust = 1, size = 3, palette = "RdYlGn", label_alpha=0.1, layout.exp = 2)
+
+# Calculate VIF scores
+# For 2015 result
+lab15_vif <- vif(lm(conLabSwing ~ younger_adults + white + degree_educated, data=census_data_ts))
+
+View(lab15_vif)
+
+# For 2017 swing
+swing_vif <- vif(lm(conLabSwing ~ young_adults + younger_adults + white + english_speaking + not_good_health + degree_educated + no_car + professionals + social_housing, data=census_data_ts))
+
+#View(swing_vif)
+```
+
+
+```{r, echo=TRUE, eval=FALSE}
+
+
+
+m_15_multi <- lm(labPct15 ~ younger_adults + white + english_speaking + not_good_health + social_housing , data=swing_map)
+m_15_nocar <- lm(labPct15 ~ no_car, data=swing_map)
+m_swing_multi <- lm(conLabSwing ~ younger_adults + degree_educated + white, data=swing_map)
+m_swing_degree <- lm(conLabSwing ~ degree_educated, data=swing_map)
+
+swing_map$resids_15_multi <- resid(m_15_multi)
+swing_map$resids_15_nocar <- resid(m_15_nocar)
+swing_map$resids_swing_degree <- resid(m_swing_degree)
+swing_map$resids_swing_multi <- resid(m_swing_multi)
+
+
+norm_resids <- function(data) {
+  if (abs(min(data)) > max(data)) {
+       max_range_value = abs(min(data))
+       min_range_value = min(data)
+  } else {
+    max_range_value = max(data)
+    min_range_value = -max(data)
+  }
+  (2 * data) / (max_range_value - min_range_value)
+  }
+
+swing_map$resids_15_nocar <- norm_resids(swing_map$resids_15_nocar)
+swing_map$resids_swing_degree <- norm_resids(swing_map$resids_swing_degree)
+swing_map$resids_15_multi <- norm_resids(swing_map$resids_15_multi)
+swing_map$resids_swing_multi <- norm_resids(swing_map$resids_swing_multi)
+
+
+```
+```{r, echo=TRUE, eval=FALSE}
+
+pal1 = colorNumeric("RdBu", domain=c(-1.0,1.0), reverse=TRUE)
+
+label_no1 <- paste0(
+  "<strong>", swing_map$constituency_name, "</strong>", "</br>",
+  "Residual: ", swing_map$resids_15_nocar
+) %>% lapply(htmltools::HTML)
+
+leaflet(options=leafletOptions(
+  dragging = FALSE, zoomControl = FALSE, tap = FALSE,
+  attributionControl = FALSE),
+  swing_map) %>%
+  addPolygons(
+    color = "grey",
+    weight=0.75,
+    opacity = 0.5,
+    fillOpacity = 1,
+    fillColor = ~pal1(resids_15_nocar),
+    label = label_no1) %>%
+  addLegend("topright", pal = pal1, values = c(-1.0,1.0),
+    title = "<p>Normalised Residuals from</p><p>Univariate Global Model</p>",
+    opacity = 1)  %>% 
+  htmlwidgets::onRender(
+    "function(x, y) {
+        var myMap = this;
+        myMap._container.style['background'] = '#fff';
+    }")%>% 
+  mapOptions(zoomToLimits = "first")
+
+
+
+label_no2 <- paste0(
+  "<strong>", swing_map$constituency_name, "</strong>", "</br>",
+  "Residual: ", swing_map$resids_swing_degree
+) %>% lapply(htmltools::HTML)
+
+leaflet(options=leafletOptions(
+  dragging = FALSE, zoomControl = FALSE, tap = FALSE,
+  #minZoom = 6, maxZoom = 6, maxBounds = list(list(2.5,-7.75),list(58.25,50.0)),
+  attributionControl = FALSE),
+  swing_map) %>%
+  addPolygons(
+    color = "grey",
+    weight=0.75,
+    opacity = 0.5,
+    fillOpacity = 1,
+    fillColor = ~pal1(resids_swing_degree),
+    label = label_no2) %>%
+  addLegend("topright", pal = pal1, values = c(-1.0,1.0),
+    title = "<p>Normalised Residuals from</p><p>Univariate Global Model</p>",
+    opacity = 1)  %>% 
+  htmlwidgets::onRender(
+    "function(x, y) {
+        var myMap = this;
+        myMap._container.style['background'] = '#fff';
+    }")%>% 
+  mapOptions(zoomToLimits = "first")
+
+#summary(m_15_multi)
+#vif(m_15_multi)
+
+#summary(m_swing_multi)
+#vif(m_swing_multi)
+
+```
+
+```{r, echo=TRUE, eval=FALSE}
+ew_swing_map <- swing_map %>%
+  filter(region_name != "Scotland")
+
+m_ew_15_nocar <- lm(labPct15 ~ no_car, data=ew_swing_map)
+ew_swing_map$resids_ew_15_nocar <- resid(m_ew_15_nocar)
+#ew_swing_map$resids_ew_15_nocar <- norm_resids(ew_swing_map$resids_ew_15_nocar)
+
+m_ew_swing_degree <- lm(conLabSwing ~ degree_educated, data=ew_swing_map)
+ew_swing_map$resids_ew_swing_degree <- resid(m_ew_swing_degree)
+#ew_swing_map$resids_ew_swing_degree <- norm_resids(ew_swing_map$resids_ew_swing_degree)
+
+m_ew_15_multi <- lm(labPct15 ~ younger_adults + white + english_speaking + not_good_health + social_housing, data=ew_swing_map)
+ew_swing_map$resids_ew_15_multi <- resid(m_ew_15_multi)
+#ew_swing_map$resids_ew_15_multi <- norm_resids(ew_swing_map$resids_ew_15_multi)
+
+m_ew_swing_multi <- lm(conLabSwing ~ younger_adults + degree_educated + white, data=ew_swing_map)
+ew_swing_map$resids_ew_swing_multi <- resid(m_ew_swing_multi)
+#ew_swing_map$resids_ew_swing_multi <- norm_resids(ew_swing_map$resids_ew_swing_multi)
+
+label_no1 <- paste0(
+  "<strong>", ew_swing_map$constituency_name, "</strong>", "</br>",
+  "Residual: ", ew_swing_map$resids_ew_swing_degree
+) %>% lapply(htmltools::HTML)
+
+leaflet(options=leafletOptions(
+  dragging = FALSE, zoomControl = FALSE, tap = FALSE,
+  attributionControl = FALSE),
+  ew_swing_map) %>%
+  addPolygons(
+    color = "grey",
+    weight=0.75,
+    opacity = 0.5,
+    fillOpacity = 1,
+    fillColor = ~pal1(resids_ew_swing_degree),
+    label = label_no1) %>%
+  addLegend("topright", pal = pal1, values = c(-0.45,0.45),
+    title = "<p>Normalised Residuals from</p><p>Univariate Global Model</p>",
+    opacity = 1)  %>% 
+  htmlwidgets::onRender(
+    "function(x, y) {
+        var myMap = this;
+        myMap._container.style['background'] = '#fff';
+    }")%>% 
+  mapOptions(zoomToLimits = "first")
+
+label_no2 <- paste0(
+  "<strong>", ew_swing_map$constituency_name, "</strong>", "</br>",
+  "Residual: ", ew_swing_map$resids_ew_swing_degree
+) %>% lapply(htmltools::HTML)
+
+leaflet(options=leafletOptions(
+  dragging = FALSE, zoomControl = FALSE, tap = FALSE,
+  attributionControl = FALSE),
+  ew_swing_map) %>%
+  addPolygons(
+    color = "grey",
+    weight=0.75,
+    opacity = 0.5,
+    fillOpacity = 1,
+    fillColor = ~pal1(resids_ew_swing_degree),
+    label = label_no2) %>%
+  addLegend("topright", pal = pal1, values = c(-0.45,0.45),
+    title = "<p>Normalised Residuals from</p><p>Univariate Global Model</p>",
+    opacity = 1)  %>% 
+  htmlwidgets::onRender(
+    "function(x, y) {
+        var myMap = this;
+        myMap._container.style['background'] = '#fff';
+    }")%>% 
+  mapOptions(zoomToLimits = "first")
+
+summary(m_ew_15_multi)
+summary(m_ew_swing_multi)
+```
+
+Model each variable and get adjusted R^2
+
+```{r, echo=TRUE, eval=FALSE}
+
+m_15_young <- lm(labPct15 ~ young_adults, data=swing_map)
+m_15_younger <- lm(labPct15 ~ younger_adults, data=swing_map)
+m_15_degree <- lm(labPct15 ~ degree_educated, data=swing_map)
+m_15_prof <- lm(labPct15 ~ professionals, data=swing_map)
+m_15_white <- lm(labPct15 ~ white, data=swing_map)
+m_15_christian <- lm(labPct15 ~ christian, data=swing_map)
+m_15_englishSp <- lm(labPct15 ~ english_speaking, data=swing_map)
+m_15_singleEth <- lm(labPct15 ~ single_ethnicity_household, data=swing_map)
+m_15_social <- lm(labPct15 ~ social_housing, data=swing_map)
+m_15_nocar <- lm(labPct15 ~ no_car, data=swing_map)
+m_15_ngh <- lm(labPct15 ~ not_good_health, data=swing_map)
+
+m_swing_young <- lm(conLabSwing ~ young_adults, data=swing_map)
+m_swing_younger <- lm(conLabSwing ~ younger_adults, data=swing_map)
+m_swing_degree <- lm(conLabSwing ~ degree_educated, data=swing_map)
+m_swing_prof <- lm(conLabSwing ~ professionals, data=swing_map)
+m_swing_white <- lm(conLabSwing ~ white, data=swing_map)
+m_swing_christian <- lm(conLabSwing ~ christian, data=swing_map)
+m_swing_englishSp <- lm(conLabSwing ~ english_speaking, data=swing_map)
+m_swing_singleEth <- lm(conLabSwing ~ single_ethnicity_household, data=swing_map)
+m_swing_social <- lm(conLabSwing ~ social_housing, data=swing_map)
+m_swing_nocar <- lm(conLabSwing ~ no_car, data=swing_map)
+m_swing_ngh <- lm(conLabSwing ~ not_good_health, data=swing_map)
+
+summary(m_15_young)$adj.r.squared
+summary(m_15_younger)$adj.r.squared
+summary(m_15_degree)$adj.r.squared
+summary(m_15_prof)$adj.r.squared
+summary(m_15_white)$adj.r.squared
+summary(m_15_christian)$adj.r.squared
+summary(m_15_englishSp)$adj.r.squared
+summary(m_15_singleEth)$adj.r.squared
+summary(m_15_social)$adj.r.squared
+summary(m_15_nocar)$adj.r.squared
+summary(m_15_ngh)$adj.r.squared
+
+summary(m_swing_young)$adj.r.squared
+summary(m_swing_younger)$adj.r.squared
+summary(m_swing_degree)$adj.r.squared
+summary(m_swing_prof)$adj.r.squared
+summary(m_swing_white)$adj.r.squared
+summary(m_swing_christian)$adj.r.squared
+summary(m_swing_englishSp)$adj.r.squared
+summary(m_swing_singleEth)$adj.r.squared
+summary(m_swing_social)$adj.r.squared
+summary(m_swing_nocar)$adj.r.squared
+summary(m_swing_ngh)$adj.r.squared
+```
+
+## GWSS
+```{r, echo=TRUE, eval=FALSE}
+
+pc_boundaries <- readOGR(dsn = "GB_Hex_Cartogram_Const", layer = "GB_Hex_Cartogram_Const")
+pc_boundaries@data <- left_join(pc_boundaries@data, census_data_ts, by=c("CODE"="PCON16CD"))
+
+pc_boundaries <- pc_boundaries[!is.na(pc_boundaries@data$labPct15),]
+
+# Note that we use the 'optimal' bandwidth derived from the bw.gwr() function.
+gw_ss_15 <- gwss(pc_boundaries, vars  =  c("labPct15", "conLabSwing", "younger_adults", "degree_educated",
+                                           "professionals", "white", "christian", "english_speaking",
+                                           "single_ethnicity_household", "social_housing", "no_car", "not_good_health"), kernel =
+                   "bisquare", adaptive = TRUE, bw = 75, quantile = TRUE)
+
+gw_ss_15_cols <- as.data.frame(colnames(gw_ss_15$SDF@data))
+```
+## Sepearate GW plots
+
+```{r, echo=TRUE, eval=FALSE}
+
+tm_shape(gw_ss_15$SDF) +
+  tm_fill(col=colnames(gw_ss_15$SDF@data[137]), title="gwr coefficients", style="cont",palette="-RdBu", size=0.2) + 
+  tm_layout(
+     main.title="GW Correlation to Labour 2015 Vote Share",
+     frame=FALSE,
+     title.snap.to.legend=FALSE,
+     title.size=1,
+     title.position = c("left", "top"),
+     #inner.margins = c(0,0,0.15,0),
+     legend.title.size=1,
+     legend.text.size=0.6,
+     legend.outside=TRUE)
+
+tm_shape(gw_ss_15$SDF) +
+  tm_fill(col=colnames(gw_ss_15$SDF@data[138:147]), title="gwr coefficients", style="cont",palette="-RdBu", size=0.2) + 
+  tm_facets(free.scales = FALSE) +
+  tm_layout(
+     main.title="GW Correlation Between Labour 2015 Vote Share\nand 2017 Swing towards Labour",
+     panel.labels=c("Younger Adults", "Degree Educated", "Professionals", "White", "Christian", 
+                    "English Speaking", "Single Ethnicity Household", "Social Housing", "No Car", "Not Good Health"),
+     frame=FALSE,
+     title.snap.to.legend=FALSE,
+     title.size=1,
+     title.position = c("left", "top"),
+     #inner.margins = c(0,0,0.15,0),
+     legend.title.size=1,
+     legend.text.size=0.6,
+     legend.outside=TRUE)
+
+tm_shape(gw_ss_15$SDF) +
+  tm_fill(col=colnames(gw_ss_15$SDF@data[128:137]), title="gwr coefficients", style="cont",palette="-RdBu", size=0.2) + 
+  tm_facets(free.scales = FALSE) +
+  tm_layout(
+     main.title="GW Correlation to 2017 Swing to Labour",
+     panel.labels=c("Younger Adults", "Degree Educated", "Professionals", "White", "Christian", 
+                    "English Speaking", "Single Ethnicity Household", "Social Housing", "No Car", "Not Good Health"),
+     frame=FALSE,
+     title.snap.to.legend=FALSE,
+     title.size=1,
+     title.position = c("left", "top"),
+     #inner.margins = c(0,0,0.15,0),
+     legend.title.size=1,
+     legend.text.size=0.6,
+     legend.outside=TRUE)
+```
+
+## Sinlge GW plot
+
+```{r, echo=TRUE, eval=FALSE}
+
+tm_shape(gw_ss_15$SDF) +
+  tm_fill(col=colnames(gw_ss_15$SDF@data[127:147]), title="gwr coefficients", style="cont",palette="-RdBu", size=0.2) + 
+  tm_facets(free.scales = FALSE) +
+  tm_layout(
+     main.title="Geographically Weighted Correlation to 2015 Vote Share and 2017 Swing to Labour",
+     panel.labels=c("2015 Support vs\n2017 Swing", "2015 Support vs\nYounger Adults", "2015 Support vs\nDegrees", 
+                    "2015 Support vs\nProfessionals", "2015 Support vs\nWhite", "2015 Support vs\nChristian", 
+                    "2015 Support vs\nEnglish Speaking", "2015 Support vs\nEthnicity", 
+                    "2015 Support vs\nSocial Housing", "2015 Support vs\nNo Car", "2015 Support vs\nNot Good Health", 
+                    "2017 Swing vs\nYounger Adults", "2017 Swing vs\nDegrees", "2017 Swing vs\nProfessionals", 
+                    "2017 Swing vs\nWhite", "2017 Swing vs\nChristian", "2017 Swing vs\nEnglish Speaking", 
+                    "2017 Swing vs\nEthnicity", "2017 Swing vs\nSocial Housing", 
+                    "2017 Swing vs\nNo Car", "2017 Swing vs\nNot Good Health"),
+     panel.label.size=1.5,
+     panel.label.bg.color = "white",
+     panel.label.height = 1.25,
+     frame=FALSE,
+     title.snap.to.legend=FALSE,
+     title.size=1,
+     title.position = c("left", "top"),
+     #inner.margins = c(0,0,0.15,0),
+     legend.title.size=1.5,
+     legend.text.size=1,
+     legend.outside=TRUE)
+```
+
