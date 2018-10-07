@@ -41,8 +41,8 @@ library(htmlwidgets)
 library(parlitools)
 ```
 
-Load the raw data. 2015 results and have swing have already been incorporated in Excel.
-
+## Load and Prepare Data
+Load the raw data (2015 results and swing have already been incorporated in Excel):
 ```{r, echo=FALSE}
 
 election17 <- read_csv('HoC-GE2017-constituency-results.csv')
@@ -51,7 +51,7 @@ census_data_ts <- read_csv('2011_census_oa_working.csv')
 
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Pre-process data:
 
 ```{r, echo=TRUE, eval=FALSE}
 
@@ -98,6 +98,8 @@ rm(election17)
 
 ```
 
+## Visualise Electoral Success Metrics
+Leaflet plots of swing and share of vote:
 ```{r, echo=TRUE, eval=FALSE}
 # Plot map of swing from Conservative to Labour at 2017 election
 pal1 = colorNumeric("RdBu", swing_map$conLabSwing, reverse=TRUE, na.color="white")
@@ -159,7 +161,8 @@ leaflet(options=leafletOptions(
 
 ```
 
-
+## Investigate Variable Relationships
+Plot demographics against swing:
 ```{r, echo=TRUE, eval=FALSE}
 swing_map %>%
 
@@ -175,6 +178,7 @@ swing_map %>%
   ggtitle("Demographic Variables vs 2017 Swing")
 ```
 
+PLot demographics against vote share:
 ```{r, echo=TRUE, eval=FALSE}
 swing_map %>%
 
@@ -200,7 +204,7 @@ region_const_count <- census_data_ts %>%
 
 ```
 
-Correlation between baseline and swing
+Correlation between baseline and swing:
 
 ```{r, echo=TRUE, eval=FALSE}
 swing_map %>%
@@ -214,7 +218,7 @@ swing_map %>%
 
 ```
 
-
+Calculate correlation between variables:
 ```{r, echo=TRUE, eval=FALSE}
 # Generate correlation coefficient matrix
 census_data_ts %>% 
@@ -239,7 +243,8 @@ swing_vif <- vif(lm(conLabSwing ~ young_adults + younger_adults + white + englis
 #View(swing_vif)
 ```
 
-
+## Regression Models
+Prepare regression models and plot residuals:
 ```{r, echo=TRUE, eval=FALSE}
 
 
@@ -339,7 +344,7 @@ leaflet(options=leafletOptions(
 #vif(m_swing_multi)
 
 ```
-
+Repeat reression models using only England and Wales data:
 ```{r, echo=TRUE, eval=FALSE}
 ew_swing_map <- swing_map %>%
   filter(region_name != "Scotland")
@@ -416,7 +421,7 @@ summary(m_ew_15_multi)
 summary(m_ew_swing_multi)
 ```
 
-Model each variable and get adjusted R^2
+Model each variable and get adjusted R^2:
 
 ```{r, echo=TRUE, eval=FALSE}
 
@@ -469,7 +474,8 @@ summary(m_swing_nocar)$adj.r.squared
 summary(m_swing_ngh)$adj.r.squared
 ```
 
-## GWSS
+## Globally Weighted Summary Statistics
+Prepare GWSS data:
 ```{r, echo=TRUE, eval=FALSE}
 
 pc_boundaries <- readOGR(dsn = "GB_Hex_Cartogram_Const", layer = "GB_Hex_Cartogram_Const")
